@@ -1,0 +1,1568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Fleet Hub — Intelligent Fleet Management</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/aws-sdk/2.1692.0/aws-sdk.min.js"></script>
+<script src="https://unpkg.com/mqtt@5.3.4/dist/mqtt.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Manrope:wght@300;400;500;600;700;800&display=swap');
+
+:root {
+  --bg: #060a10;
+  --bg2: #0c1018;
+  --surface: rgba(255,255,255,0.035);
+  --surface2: rgba(255,255,255,0.06);
+  --surface3: rgba(255,255,255,0.09);
+  --border: rgba(255,255,255,0.06);
+  --border2: rgba(255,255,255,0.1);
+  --border3: rgba(255,255,255,0.15);
+  --cyan: #22d3ee;
+  --cyan-dim: rgba(34,211,238,0.1);
+  --cyan-glow: rgba(34,211,238,0.3);
+  --green: #34d399;
+  --green-dim: rgba(52,211,153,0.1);
+  --amber: #fbbf24;
+  --amber-dim: rgba(251,191,36,0.1);
+  --red: #f87171;
+  --red-dim: rgba(248,113,113,0.1);
+  --purple: #a78bfa;
+  --text: rgba(255,255,255,0.93);
+  --text2: rgba(255,255,255,0.5);
+  --text3: rgba(255,255,255,0.25);
+  --mono: 'DM Mono', monospace;
+  --sans: 'Manrope', system-ui, sans-serif;
+  --r: 12px;
+  --rs: 8px;
+}
+
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;overflow:hidden;}
+
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:var(--sans);
+  font-size:13px;
+  display:flex;
+  flex-direction:column;
+  -webkit-font-smoothing:antialiased;
+}
+
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.08);border-radius:4px;}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.15);}
+
+/* ── Keyframes ── */
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.3;transform:scale(0.7)}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
+@keyframes slideDown{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes fadeOut{from{opacity:1}to{opacity:0}}
+@keyframes floatUp{from{opacity:0;transform:translateY(16px) scale(0.98)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-5px)}40%,80%{transform:translateX(5px)}}
+@keyframes scan{from{transform:translateY(-100%)}to{transform:translateY(100vh)}}
+@keyframes tripPulse{0%,100%{box-shadow:0 0 0 0 rgba(52,211,153,0.35)}70%{box-shadow:0 0 0 8px rgba(52,211,153,0)}}
+@keyframes glowPulse{0%,100%{filter:drop-shadow(0 0 6px var(--cyan-glow))}50%{filter:drop-shadow(0 0 12px var(--cyan-glow))}}
+@keyframes dotPulse{0%,100%{opacity:1}50%{opacity:0.35}}
+
+.leaflet-control-attribution,.leaflet-control-zoom{display:none!important;}
+
+/* ════════════════════════════════════════════════════════════
+   LOGIN
+══════════════════════════════════════════════════════════════ */
+#loginOverlay{
+  position:fixed;inset:0;z-index:9999;
+  background:var(--bg);
+  display:flex;align-items:center;justify-content:center;
+  overflow:hidden;
+}
+#loginOverlay::before{
+  content:'';position:absolute;inset:0;
+  background-image:
+    linear-gradient(rgba(34,211,238,0.025) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(34,211,238,0.025) 1px,transparent 1px);
+  background-size:48px 48px;
+}
+#loginOverlay::after{
+  content:'';position:absolute;inset:0;
+  background:radial-gradient(ellipse 50% 40% at 50% 50%,rgba(34,211,238,0.05) 0%,transparent 70%);
+}
+.login-scan{
+  position:absolute;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(34,211,238,0.15),transparent);
+  animation:scan 6s linear infinite;pointer-events:none;z-index:1;
+}
+.login-card{
+  position:relative;z-index:2;
+  width:100%;max-width:380px;
+  padding:40px 36px;
+  background:rgba(12,16,24,0.92);
+  border:1px solid rgba(34,211,238,0.12);
+  border-radius:20px;
+  backdrop-filter:blur(32px);
+  box-shadow:0 0 80px rgba(34,211,238,0.04),0 32px 80px rgba(0,0,0,0.6);
+  animation:floatUp 0.6s cubic-bezier(0.16,1,0.3,1) forwards;
+}
+.login-logo{display:flex;align-items:center;gap:14px;margin-bottom:32px;}
+.login-logo-icon{
+  width:44px;height:44px;
+  background:linear-gradient(135deg,var(--cyan),#0ea5e9);
+  border-radius:12px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:20px;
+  box-shadow:0 4px 20px rgba(34,211,238,0.25);
+}
+.login-brand-name{font-size:20px;font-weight:800;letter-spacing:-0.3px;}
+.login-brand-sub{font-size:9px;color:var(--text2);letter-spacing:2.5px;text-transform:uppercase;margin-top:2px;}
+.login-title{font-size:12px;color:var(--text2);margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid var(--border2);}
+.login-field{margin-bottom:16px;}
+.login-label{display:block;font-size:9px;font-weight:700;color:var(--text2);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:7px;}
+.login-input-wrap{position:relative;}
+.login-input{
+  width:100%;padding:11px 14px 11px 38px;
+  background:rgba(255,255,255,0.035);
+  border:1px solid rgba(255,255,255,0.08);
+  border-radius:10px;color:var(--text);
+  font-family:var(--mono);font-size:13px;outline:none;
+  transition:border-color 0.25s,background 0.25s,box-shadow 0.25s;
+}
+.login-input:focus{border-color:rgba(34,211,238,0.4);background:rgba(34,211,238,0.03);box-shadow:0 0 0 3px rgba(34,211,238,0.06);}
+.login-input::placeholder{color:var(--text3);font-family:var(--sans);font-size:12px;}
+.login-icon{position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:13px;opacity:0.3;}
+.pw-toggle{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text2);cursor:pointer;font-size:12px;transition:color 0.2s;line-height:1;}
+.pw-toggle:hover{color:var(--cyan);}
+.login-error{
+  display:none;font-size:11px;font-weight:600;color:var(--red);
+  background:var(--red-dim);border:1px solid rgba(248,113,113,0.15);
+  border-radius:8px;padding:8px 12px;margin-bottom:14px;text-align:center;
+}
+.login-error.show{display:block;animation:shake 0.35s ease-out;}
+.login-btn{
+  width:100%;padding:12px;
+  background:linear-gradient(135deg,#0891b2,var(--cyan));
+  border:none;border-radius:10px;color:white;
+  font-family:var(--sans);font-size:12px;font-weight:700;
+  letter-spacing:1.2px;text-transform:uppercase;cursor:pointer;
+  transition:opacity 0.2s,transform 0.15s;
+  box-shadow:0 4px 20px rgba(34,211,238,0.25);margin-top:6px;
+}
+.login-btn:hover{opacity:0.9;transform:translateY(-1px);}
+.login-footer{margin-top:20px;text-align:center;font-size:8px;color:var(--text3);letter-spacing:1px;text-transform:uppercase;}
+#loginOverlay.leaving{animation:fadeOut 0.4s ease-out forwards;pointer-events:none;}
+
+/* ════════════════════════════════════════════════════════════
+   APP SHELL
+══════════════════════════════════════════════════════════════ */
+#appShell{display:none;flex-direction:column;height:100%;overflow:hidden;}
+
+/* Critical Banner */
+#critBanner{
+  display:none;
+  background:linear-gradient(90deg,rgba(248,113,113,0.92),rgba(220,38,38,0.92));
+  color:white;text-align:center;padding:8px 48px;
+  font-weight:700;font-size:11px;letter-spacing:1px;
+  position:relative;flex-shrink:0;
+  box-shadow:0 2px 16px rgba(248,113,113,0.3);
+  animation:slideDown 0.3s ease-out;z-index:100;
+}
+#critBanner::before{
+  content:'';position:absolute;inset:0;
+  background:repeating-linear-gradient(-45deg,transparent,transparent 8px,rgba(0,0,0,0.04) 8px,rgba(0,0,0,0.04) 16px);
+}
+#critBanner button{
+  position:absolute;right:14px;top:50%;transform:translateY(-50%);
+  background:rgba(255,255,255,0.15);border:none;color:white;
+  cursor:pointer;border-radius:5px;width:24px;height:24px;
+  font-size:11px;z-index:1;transition:background 0.2s;
+}
+#critBanner button:hover{background:rgba(255,255,255,0.3);}
+
+/* ── Header ── */
+.hdr{
+  padding:0 20px;height:52px;
+  background:rgba(6,10,16,0.96);
+  backdrop-filter:blur(24px);
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:14px;
+  flex-shrink:0;z-index:50;
+}
+.hdr-logo{
+  width:32px;height:32px;
+  background:linear-gradient(135deg,var(--cyan),#0ea5e9);
+  border-radius:9px;display:flex;align-items:center;justify-content:center;
+  font-size:15px;
+  box-shadow:0 0 16px var(--cyan-glow);
+  flex-shrink:0;animation:glowPulse 4s ease-in-out infinite;
+}
+.hdr-brand{flex-shrink:0;}
+.hdr-brand-name{font-size:14px;font-weight:800;letter-spacing:-0.2px;line-height:1;}
+.hdr-brand-sub{font-size:7.5px;color:var(--text2);letter-spacing:2px;text-transform:uppercase;margin-top:1px;}
+.hdr-div{width:1px;height:24px;background:var(--border2);margin:0 2px;flex-shrink:0;}
+
+/* Connection pill */
+.conn-pill{
+  display:flex;align-items:center;gap:6px;
+  padding:4px 11px;border-radius:20px;
+  background:var(--surface);border:1px solid var(--border2);
+  font-family:var(--mono);font-size:9px;font-weight:500;
+  letter-spacing:0.5px;flex-shrink:0;
+}
+.conn-dot{width:6px;height:6px;border-radius:50%;animation:dotPulse 2s infinite;}
+
+/* Ignition badge */
+.ign-badge{
+  display:flex;align-items:center;gap:5px;
+  padding:4px 11px;border-radius:20px;
+  font-size:9px;font-weight:800;letter-spacing:1px;
+  text-transform:uppercase;flex-shrink:0;transition:all 0.4s;
+}
+.ign-badge.on{background:var(--green-dim);color:var(--green);border:1px solid rgba(52,211,153,0.2);}
+.ign-badge.off{background:var(--red-dim);color:var(--red);border:1px solid rgba(248,113,113,0.15);}
+
+/* Header metrics */
+.hdr-metrics{display:flex;gap:0;margin-left:auto;}
+.hdr-m{text-align:right;padding:0 14px;border-left:1px solid var(--border);}
+.hdr-ml{font-size:7.5px;color:var(--text3);letter-spacing:1.2px;text-transform:uppercase;font-weight:600;margin-bottom:2px;}
+.hdr-mv{font-size:12px;font-weight:600;font-family:var(--mono);}
+
+/* Signal bars */
+.sig-bars{display:flex;align-items:flex-end;gap:2px;height:14px;}
+.sig-bar{width:4px;border-radius:1.5px;background:var(--border2);transition:background 0.4s,height 0.4s;}
+
+/* ── Tracking Bar ── */
+.tracking-bar{
+  display:flex;align-items:center;gap:10px;
+  padding:7px 20px;
+  background:rgba(12,16,24,0.85);
+  border-bottom:1px solid var(--border);
+  flex-shrink:0;backdrop-filter:blur(12px);
+}
+.track-status{display:flex;align-items:center;gap:7px;flex:1;min-width:0;}
+.track-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.track-lbl{font-size:11px;font-weight:600;}
+.track-info{font-size:10px;color:var(--text2);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.trip-pill{
+  font-size:8px;font-weight:800;padding:3px 9px;border-radius:12px;
+  background:var(--green-dim);color:var(--green);
+  border:1px solid rgba(52,211,153,0.15);letter-spacing:0.8px;
+  flex-shrink:0;animation:tripPulse 2s infinite;text-transform:uppercase;
+}
+.btn-track{
+  padding:6px 16px;border-radius:8px;border:none;cursor:pointer;
+  font-family:var(--sans);font-size:10px;font-weight:700;
+  letter-spacing:0.5px;transition:all 0.2s;flex-shrink:0;
+}
+.btn-track.start{
+  background:linear-gradient(135deg,#059669,var(--green));color:white;
+  box-shadow:0 3px 12px rgba(52,211,153,0.25);
+}
+.btn-track.start:hover:not(:disabled){opacity:0.9;transform:translateY(-1px);}
+.btn-track.start:disabled{opacity:0.25;cursor:not-allowed;transform:none;box-shadow:none;}
+.btn-track.stop{background:var(--red-dim);color:var(--red);border:1px solid rgba(248,113,113,0.2);}
+.btn-track.stop:hover{background:rgba(248,113,113,0.15);}
+.btn-gf{
+  padding:6px 12px;border-radius:8px;border:1px solid rgba(34,211,238,0.2);
+  background:var(--cyan-dim);color:var(--cyan);
+  font-family:var(--sans);font-size:10px;font-weight:700;
+  letter-spacing:0.3px;cursor:pointer;transition:all 0.2s;flex-shrink:0;
+}
+.btn-gf:hover{background:rgba(34,211,238,0.15);}
+
+/* ════════════════════════════════════════════════════════════
+   MAIN LAYOUT
+══════════════════════════════════════════════════════════════ */
+.main{
+  flex:1;display:grid;
+  grid-template-columns:1fr 340px;
+  grid-template-rows:1fr;
+  gap:0;overflow:hidden;
+}
+.col-left{display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--border);}
+.col-right{display:flex;flex-direction:column;overflow:hidden;background:rgba(6,10,16,0.5);}
+
+/* ── Map ── */
+.map-wrap{flex:1;position:relative;overflow:hidden;min-height:200px;}
+.map-wrap.fullscreen{position:fixed;inset:0;z-index:9998;}
+#fleet-map{width:100%;height:100%;background:#080e18;}
+
+.map-badge{
+  position:absolute;top:12px;left:12px;z-index:400;
+  display:flex;align-items:center;gap:6px;
+  padding:5px 12px;border-radius:20px;
+  background:rgba(6,10,16,0.88);border:1px solid rgba(34,211,238,0.2);
+  backdrop-filter:blur(16px);
+}
+.map-badge-dot{width:5px;height:5px;border-radius:50%;background:var(--cyan);animation:dotPulse 2s infinite;box-shadow:0 0 8px var(--cyan);}
+.map-badge-txt{font-size:8px;font-weight:800;color:var(--cyan);letter-spacing:1.5px;}
+
+.map-ctrls{position:absolute;top:12px;right:12px;z-index:400;display:flex;gap:6px;}
+.map-btn{
+  background:rgba(6,10,16,0.88);border:1px solid var(--border2);
+  color:var(--text);border-radius:var(--rs);
+  width:32px;height:32px;display:flex;align-items:center;justify-content:center;
+  cursor:pointer;transition:all 0.2s;font-size:13px;
+  backdrop-filter:blur(16px);
+}
+.map-btn:hover{background:var(--cyan-dim);border-color:rgba(34,211,238,0.35);color:var(--cyan);}
+.map-theme-btn{width:auto;padding:0 10px;font-size:9px;font-weight:700;letter-spacing:0.5px;}
+
+.map-info-bar{
+  position:absolute;bottom:0;left:0;right:0;z-index:400;
+  background:rgba(6,10,16,0.92);border-top:1px solid var(--border);
+  backdrop-filter:blur(16px);
+  display:flex;align-items:center;padding:8px 16px;gap:20px;
+}
+.map-info-bar.light-mode{background:rgba(255,255,255,0.92);border-color:rgba(0,0,0,0.08);}
+.mib-item{display:flex;flex-direction:column;gap:1px;}
+.mib-lbl{font-size:7.5px;font-weight:700;color:var(--text3);letter-spacing:1px;text-transform:uppercase;}
+.mib-val{font-size:12px;font-weight:500;font-family:var(--mono);}
+
+/* ── Stats row ── */
+.stats-row{
+  display:grid;
+  grid-template-columns:repeat(5,1fr);
+  border-top:1px solid var(--border);
+  flex-shrink:0;
+}
+.stat-cell{
+  padding:12px 14px;border-right:1px solid var(--border);
+  display:flex;flex-direction:column;gap:2px;position:relative;
+  overflow:hidden;
+}
+.stat-cell:last-child{border-right:none;}
+.stat-cell::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;}
+.stat-cell.c-cyan::before{background:linear-gradient(90deg,var(--cyan),transparent);}
+.stat-cell.c-green::before{background:linear-gradient(90deg,var(--green),transparent);}
+.stat-cell.c-amber::before{background:linear-gradient(90deg,var(--amber),transparent);}
+.stat-cell.c-red::before{background:linear-gradient(90deg,var(--red),transparent);}
+.stat-cell.c-purple::before{background:linear-gradient(90deg,var(--purple),transparent);}
+.stat-lbl{font-size:7.5px;font-weight:700;color:var(--text3);letter-spacing:1px;text-transform:uppercase;}
+.stat-val{font-size:24px;font-weight:300;font-family:var(--mono);line-height:1.1;}
+.stat-sub{font-size:9px;color:var(--text2);}
+
+/* ── Speed chart ── */
+.speed-strip{
+  height:60px;border-top:1px solid var(--border);
+  flex-shrink:0;position:relative;padding:0;
+}
+.speed-strip canvas{display:block;width:100%;height:100%;}
+.speed-limit-line{
+  position:absolute;right:8px;top:50%;
+  font-size:8px;color:var(--amber);font-family:var(--mono);font-weight:500;
+  transform:translateY(-50%);pointer-events:none;
+  background:rgba(6,10,16,0.7);padding:1px 5px;border-radius:4px;
+}
+
+/* ════════════════════════════════════════════════════════════
+   RIGHT PANEL
+══════════════════════════════════════════════════════════════ */
+.rpanel{overflow-y:auto;flex:1;padding:12px;display:flex;flex-direction:column;gap:10px;}
+
+.card{
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:var(--r);
+  padding:14px 16px;
+  flex-shrink:0;
+  transition:border-color 0.3s;
+}
+.card:hover{border-color:var(--border2);}
+.card-hdr{
+  display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:10px;
+}
+.card-title{
+  font-size:9px;font-weight:700;color:var(--text2);
+  text-transform:uppercase;letter-spacing:1.5px;
+  display:flex;align-items:center;gap:7px;
+}
+.card-title::before{
+  content:'';width:3px;height:14px;border-radius:2px;
+  background:var(--cyan);display:inline-block;
+}
+.card-action{
+  font-size:8px;font-weight:700;color:var(--text3);
+  background:var(--surface);border:1px solid var(--border2);
+  padding:3px 8px;border-radius:5px;cursor:pointer;
+  letter-spacing:0.5px;text-transform:uppercase;
+  transition:all 0.2s;
+}
+.card-action:hover{color:var(--cyan);border-color:rgba(34,211,238,0.3);}
+
+.info-row{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.025);
+}
+.info-row:last-child{border:none;padding-bottom:0;}
+.info-k{font-size:11px;color:var(--text2);}
+.info-v{font-size:11px;font-weight:500;font-family:var(--mono);}
+
+/* Driver score */
+.score-wrap{display:flex;align-items:center;gap:16px;}
+.score-ring{position:relative;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;}
+.score-num{position:absolute;font-size:22px;font-weight:700;font-family:var(--mono);}
+.score-details{flex:1;}
+
+/* TPMS grid */
+.tpms-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.tpms-tile{
+  border-radius:var(--rs);padding:10px;
+  border:1px solid var(--border);background:rgba(255,255,255,0.015);
+  display:flex;flex-direction:column;align-items:center;gap:3px;
+  transition:border-color 0.3s,background 0.3s;
+}
+.tpms-tile.warn{border-color:rgba(248,113,113,0.25);background:var(--red-dim);}
+.tpms-tile.offline{border-color:rgba(255,255,255,0.04);background:rgba(0,0,0,0.25);}
+.tpms-pos{font-size:8px;font-weight:700;color:var(--text3);letter-spacing:1px;text-transform:uppercase;}
+.tpms-psi{font-size:17px;font-weight:700;font-family:var(--mono);}
+.tpms-psi span{font-size:8px;font-weight:400;color:var(--text2);}
+.tpms-temp{font-size:10px;color:var(--text2);}
+.tpms-bat{font-size:9px;font-family:var(--mono);}
+.tpms-offline-lbl{color:var(--text3);font-size:10px;font-weight:600;margin-top:4px;}
+
+/* Geofence */
+.gf-zone{
+  display:flex;align-items:center;gap:8px;
+  padding:7px 8px;border-radius:var(--rs);
+  border:1px solid var(--border);background:var(--surface);
+  animation:fadeIn 0.3s ease-out;
+}
+.gf-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.gf-name{font-size:11px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.gf-dist{font-size:9px;color:var(--text2);font-family:var(--mono);flex-shrink:0;}
+.gf-status-badge{
+  font-size:7px;font-weight:800;padding:2px 6px;border-radius:4px;
+  letter-spacing:0.5px;flex-shrink:0;text-transform:uppercase;
+}
+.gf-del{
+  background:none;border:none;color:var(--text3);cursor:pointer;
+  font-size:12px;padding:2px;line-height:1;flex-shrink:0;transition:color 0.2s;
+}
+.gf-del:hover{color:var(--red);}
+
+/* Speed limit */
+.speed-lim-row{display:flex;align-items:center;gap:8px;}
+.speed-lim-input{
+  width:60px;padding:6px 8px;text-align:center;
+  background:var(--surface);border:1px solid var(--border2);
+  border-radius:8px;color:var(--text);font-family:var(--mono);
+  font-size:14px;font-weight:500;outline:none;
+  transition:border-color 0.2s,box-shadow 0.2s;
+}
+.speed-lim-input:focus{border-color:rgba(251,191,36,0.4);box-shadow:0 0 0 3px rgba(251,191,36,0.06);}
+.speed-lim-btn{
+  padding:6px 12px;border-radius:8px;border:1px solid rgba(251,191,36,0.2);
+  background:var(--amber-dim);color:var(--amber);
+  font-family:var(--sans);font-size:9px;font-weight:700;
+  cursor:pointer;transition:all 0.2s;letter-spacing:0.5px;
+}
+.speed-lim-btn:hover{background:rgba(251,191,36,0.15);}
+.speed-lim-lbl{font-size:10px;color:var(--text2);}
+
+/* Alert feed */
+.alert-feed{display:flex;flex-direction:column;gap:4px;overflow-y:auto;flex:1;}
+.alert-item{
+  display:grid;grid-template-columns:auto auto 1fr;
+  gap:7px;align-items:center;
+  padding:6px 8px;border-radius:var(--rs);
+  border:1px solid transparent;
+  animation:slideDown 0.25s ease-out;
+}
+.alert-time{font-size:9px;color:var(--text3);font-family:var(--mono);white-space:nowrap;}
+.alert-badge{font-size:7px;padding:2px 6px;border-radius:4px;font-weight:800;letter-spacing:0.5px;text-transform:uppercase;white-space:nowrap;}
+.alert-msg{font-size:10px;font-weight:500;font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
+.empty{font-size:11px;color:var(--text3);text-align:center;padding:18px 0;font-style:italic;}
+
+/* Geofence form */
+.gf-form{display:flex;flex-direction:column;gap:6px;margin-bottom:8px;}
+.gf-form-row{display:flex;gap:5px;}
+.gf-inp{
+  flex:1;padding:6px 8px;
+  background:var(--surface);border:1px solid var(--border2);
+  border-radius:6px;color:var(--text);font-family:var(--mono);font-size:10px;outline:none;
+  min-width:0;transition:border-color 0.2s;
+}
+.gf-inp:focus{border-color:rgba(34,211,238,0.3);}
+.gf-inp::placeholder{color:var(--text3);font-family:var(--sans);font-size:9px;}
+.gf-add-btn{
+  padding:6px 10px;border-radius:6px;border:none;
+  background:linear-gradient(135deg,#0891b2,var(--cyan));
+  color:white;font-family:var(--sans);font-size:9px;font-weight:700;
+  cursor:pointer;white-space:nowrap;transition:opacity 0.2s;
+}
+.gf-add-btn:hover{opacity:0.85;}
+.gf-gps-btn{
+  width:100%;padding:6px;border-radius:6px;
+  border:1px solid rgba(34,211,238,0.15);background:var(--cyan-dim);
+  color:var(--cyan);font-size:9px;font-weight:700;cursor:pointer;
+  letter-spacing:0.3px;transition:background 0.2s;
+}
+.gf-gps-btn:hover{background:rgba(34,211,238,0.15);}
+
+/* Leaflet GF tooltip */
+.gf-tip{
+  background:rgba(6,10,16,0.92)!important;
+  border:1px solid rgba(34,211,238,0.25)!important;
+  color:var(--cyan)!important;
+  font-family:var(--sans)!important;
+  font-size:10px!important;font-weight:700!important;
+  border-radius:6px!important;padding:3px 8px!important;
+  box-shadow:none!important;
+}
+.gf-tip::before{display:none!important;}
+
+/* ── Responsive ── */
+@media(max-width:900px){
+  html,body{height:auto;overflow:auto;}
+  .main{grid-template-columns:1fr;grid-template-rows:auto auto;}
+  .col-right{border-top:1px solid var(--border);}
+  .stats-row{grid-template-columns:repeat(3,1fr);}
+  .hdr-metrics{display:none;}
+}
+</style>
+</head>
+<body>
+
+<!-- ════════ LOGIN ════════ -->
+<div id="loginOverlay">
+  <div class="login-scan"></div>
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="login-logo-icon">🚛</div>
+      <div class="login-brand">
+        <div class="login-brand-name">Fleet Hub</div>
+        <div class="login-brand-sub">Cloud Harbor Technologies</div>
+      </div>
+    </div>
+    <div class="login-title">Sign in to the Intelligence Dashboard</div>
+    <div class="login-field">
+      <label class="login-label" for="loginUser">Username</label>
+      <div class="login-input-wrap">
+        <span class="login-icon">👤</span>
+        <input id="loginUser" class="login-input" type="text" placeholder="Username" autocomplete="username" spellcheck="false"/>
+      </div>
+    </div>
+    <div class="login-field">
+      <label class="login-label" for="loginPass">Password</label>
+      <div class="login-input-wrap">
+        <span class="login-icon">🔒</span>
+        <input id="loginPass" class="login-input" type="password" placeholder="Password" autocomplete="current-password"/>
+        <button class="pw-toggle" id="pwToggle" type="button">👁</button>
+      </div>
+    </div>
+    <div class="login-error" id="loginError">⚠ Invalid username or password</div>
+    <button class="login-btn" id="loginBtn">Access Dashboard →</button>
+    <div class="login-footer">Fleet Hub · Intelligent Fleet Management · v6.0</div>
+  </div>
+</div>
+
+<!-- ════════ APP SHELL ════════ -->
+<div id="appShell">
+
+  <div id="critBanner">
+    <span id="critBannerText">⚠️ CRITICAL ALERT</span>
+    <button onclick="this.parentElement.style.display='none'">✕</button>
+  </div>
+
+  <div class="hdr">
+    <div class="hdr-logo">🚛</div>
+    <div class="hdr-brand">
+      <div class="hdr-brand-name">Fleet Hub</div>
+      <div class="hdr-brand-sub">Intelligent Fleet Management</div>
+    </div>
+    <div class="hdr-div"></div>
+    <div class="conn-pill">
+      <div class="conn-dot" id="cDot" style="background:var(--amber)"></div>
+      <span id="cLbl" style="color:var(--amber)">CONNECTING</span>
+    </div>
+    <div class="ign-badge off" id="ignBadge">
+      <span id="ignDot" style="width:5px;height:5px;border-radius:50%;background:currentColor;display:inline-block;"></span>
+      <span id="ignLbl">IGN OFF</span>
+    </div>
+    <div class="hdr-div"></div>
+    <div class="hdr-metrics">
+      <div class="hdr-m">
+        <div class="hdr-ml">Vehicle</div>
+        <div class="hdr-mv" id="hVehicle">AP09AB1234</div>
+      </div>
+      <div class="hdr-m">
+        <div class="hdr-ml">Firmware</div>
+        <div class="hdr-mv" id="hFw" style="color:var(--cyan)">—</div>
+      </div>
+      <div class="hdr-m">
+        <div class="hdr-ml">Last Seen</div>
+        <div class="hdr-mv" id="hTime">—</div>
+      </div>
+      <div class="hdr-m">
+        <div class="hdr-ml">Signal</div>
+        <div class="hdr-mv">
+          <div class="sig-bars" id="sigBars">
+            <div class="sig-bar" style="height:4px" id="sb1"></div>
+            <div class="sig-bar" style="height:6px" id="sb2"></div>
+            <div class="sig-bar" style="height:9px" id="sb3"></div>
+            <div class="sig-bar" style="height:12px" id="sb4"></div>
+            <div class="sig-bar" style="height:14px" id="sb5"></div>
+          </div>
+        </div>
+      </div>
+      <div class="hdr-m">
+        <div class="hdr-ml">Safety Score</div>
+        <div class="hdr-mv" id="hScore" style="color:var(--green)">—</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tracking-bar">
+    <div class="track-status">
+      <div class="track-dot" id="trkDot" style="background:var(--amber)"></div>
+      <span class="track-lbl" id="trkLbl" style="color:var(--amber)">Waiting for GPS Fix…</span>
+      <span class="trip-pill" id="tripPill" style="display:none">TRIP ACTIVE</span>
+    </div>
+    <span class="track-info" id="trkInfo">—</span>
+    <button class="btn-gf" id="btnOneClickGF" onclick="oneClickGeofence()" title="Add 200m geofence at current position">📍 GEO-FENCE HERE</button>
+    <button class="btn-track start" id="btnStart" disabled onclick="startTracking()">▶ START TRIP</button>
+    <button class="btn-track stop" id="btnStop" style="display:none" onclick="stopTracking()">■ END TRIP</button>
+  </div>
+
+  <div class="main">
+    <div class="col-left">
+      <div class="map-wrap" id="mapWrap">
+        <div id="fleet-map"></div>
+        <div class="map-badge">
+          <div class="map-badge-dot"></div>
+          <span class="map-badge-txt">LIVE TRACKING</span>
+        </div>
+        <div class="map-ctrls">
+          <button id="themeBtn" class="map-btn map-theme-btn" title="Switch map theme">🌙 DARK</button>
+          <button id="fsBtn" class="map-btn" title="Fullscreen">⛶</button>
+        </div>
+        <div class="map-info-bar" id="mapInfoBar">
+          <div class="mib-item"><div class="mib-lbl">Latitude</div><div class="mib-val" id="mLat">—</div></div>
+          <div class="mib-item"><div class="mib-lbl">Longitude</div><div class="mib-val" id="mLng">—</div></div>
+          <div class="mib-item"><div class="mib-lbl">Speed</div><div class="mib-val" id="mSpd" style="color:var(--cyan)">—</div></div>
+          <div class="mib-item"><div class="mib-lbl">Heading</div><div class="mib-val" id="mHdg">—</div></div>
+          <div class="mib-item"><div class="mib-lbl">Altitude</div><div class="mib-val" id="mAlt">—</div></div>
+          <div class="mib-item"><div class="mib-lbl">HDOP</div><div class="mib-val" id="mHdop">—</div></div>
+        </div>
+      </div>
+
+      <div class="stats-row">
+        <div class="stat-cell c-cyan">
+          <div class="stat-lbl">Speed</div>
+          <div class="stat-val" id="sSpd">—</div>
+          <div class="stat-sub">km/h</div>
+        </div>
+        <div class="stat-cell c-green">
+          <div class="stat-lbl">Satellites</div>
+          <div class="stat-val" id="sSat">—</div>
+          <div class="stat-sub" id="sFix">No Fix</div>
+        </div>
+        <div class="stat-cell c-amber">
+          <div class="stat-lbl">Trip Dist.</div>
+          <div class="stat-val" id="sTripDist">0.0</div>
+          <div class="stat-sub">km</div>
+        </div>
+        <div class="stat-cell c-purple">
+          <div class="stat-lbl">Alerts</div>
+          <div class="stat-val" id="sAlerts">0</div>
+          <div class="stat-sub" id="sAlertsub">this session</div>
+        </div>
+        <div class="stat-cell c-red">
+          <div class="stat-lbl">Device</div>
+          <div class="stat-val" id="sDevId" style="font-size:10px;padding-top:4px;">—</div>
+          <div class="stat-sub" id="sUptime">uptime: —</div>
+        </div>
+      </div>
+
+      <div class="speed-strip" id="speedStripWrap">
+        <canvas id="speedChart"></canvas>
+        <div class="speed-limit-line" id="speedLimitLine"></div>
+      </div>
+    </div>
+
+    <div class="col-right">
+      <div class="rpanel" id="rpanel">
+
+        <div class="card">
+          <div class="card-hdr">
+            <div class="card-title">Driver Behavior</div>
+            <button class="card-action" onclick="publishCmd('reset_driver_score')">Reset Score</button>
+          </div>
+          <div class="score-wrap">
+            <div class="score-ring">
+              <svg id="scoreRing" width="80" height="80" viewBox="0 0 90 90"></svg>
+              <span class="score-num" id="scoreVal">—</span>
+            </div>
+            <div class="score-details">
+              <div class="info-row"><span class="info-k">Harsh Accel</span><span class="info-v" id="dAccel">0</span></div>
+              <div class="info-row"><span class="info-k">Harsh Brake</span><span class="info-v" id="dBrake">0</span></div>
+              <div class="info-row"><span class="info-k">Harsh Corner</span><span class="info-v" id="dCorner">0</span></div>
+              <div class="info-row"><span class="info-k">Speeding (s)</span><span class="info-v" id="dSpeed">0</span></div>
+              <div class="info-row"><span class="info-k">Max Speed</span><span class="info-v" id="dMaxSpd">—</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-hdr">
+            <div class="card-title">Speed Limit</div>
+            <span style="font-size:9px;color:var(--text2);font-family:var(--mono);" id="currentLimitDisplay">Active: — km/h</span>
+          </div>
+          <div class="speed-lim-row">
+            <input type="number" class="speed-lim-input" id="speedLimInput" value="60" min="20" max="200"/>
+            <span class="speed-lim-lbl">km/h</span>
+            <button class="speed-lim-btn" id="speedLimBtn" onclick="setSpeedLimit()">SET →</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-hdr">
+            <div class="card-title">Tire Health (TPMS)</div>
+          </div>
+          <div id="tpmsInfo"><div class="empty">No sensor data</div></div>
+        </div>
+
+        <div class="card">
+          <div class="card-hdr">
+            <div class="card-title">Geo-Fences</div>
+            <span style="font-size:9px;color:var(--text2);font-family:var(--mono);" id="gfCountLbl">0 / 8 zones</span>
+          </div>
+          <div class="gf-form">
+            <div class="gf-form-row">
+              <input class="gf-inp" id="gfName" placeholder="Zone name" style="flex:2"/>
+              <input class="gf-inp" id="gfRad" type="number" value="200" placeholder="Radius m" style="width:70px;flex:none"/>
+            </div>
+            <div class="gf-form-row">
+              <input class="gf-inp" id="gfLat" type="number" step="0.000001" placeholder="Latitude"/>
+              <input class="gf-inp" id="gfLng" type="number" step="0.000001" placeholder="Longitude"/>
+              <button class="gf-add-btn" onclick="addGeofence()">+ ADD</button>
+            </div>
+            <button class="gf-gps-btn" onclick="fillCurrentGPS()">📍 USE CURRENT GPS POSITION</button>
+          </div>
+          <div id="gfList"><div class="empty">No zones configured</div></div>
+        </div>
+
+        <div class="card" style="flex:1;min-height:180px;display:flex;flex-direction:column;">
+          <div class="card-hdr">
+            <div class="card-title">Priority Alerts</div>
+            <button class="card-action" onclick="clearAlerts()">Clear</button>
+          </div>
+          <div id="alertFeed" class="alert-feed"></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════════
+// CONFIG
+// ════════════════════════════════════════════════════════════════
+const CFG = {
+  region:   'ap-south-1',
+  pool:     'ap-south-1:54907701-a8f2-4902-98b3-4cce8068029c',
+  endpoint: 'a2s18q24k203dr-ats.iot.ap-south-1.amazonaws.com',
+  devId:    'hub-prototype-001'
+};
+const TOPIC_WILD    = `dt/fleet/${CFG.devId}/#`;
+const TOPIC_ALERTS  = `dt/fleet/${CFG.devId}/alerts`;
+const TOPIC_CMD     = `cmd/fleet/${CFG.devId}/config`;
+
+// ── Your 4 registered TPMS sensors ──
+const TPMS_MAP = {
+  '80:EA:CA:03:3E:D3': 'Front Left',
+  '80:EA:CA:03:3F:36': 'Front Right',
+  '80:EA:CA:03:3E:BD': 'Rear Left',
+  '80:EA:CA:03:3E:AC': 'Rear Right'
+};
+const TPMS_ORDER = ['80:EA:CA:03:3E:D3','80:EA:CA:03:3F:36','80:EA:CA:03:3E:BD','80:EA:CA:03:3E:AC'];
+
+const TPMS_LOW_PSI = 25, TPMS_HIGH_PSI = 45, TPMS_HIGH_TEMP = 75;
+
+// ════════════════════════════════════════════════════════════════
+// SESSION PERSISTENCE — FIX: survive page refresh
+// ════════════════════════════════════════════════════════════════
+const SESSION_KEY = 'fh6_session';
+
+function setSession() {
+  // Store session with expiry (8 hours)
+  const session = { auth: true, ts: Date.now(), exp: Date.now() + (8 * 60 * 60 * 1000) };
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+}
+
+function hasValidSession() {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    if (!raw) return false;
+    const s = JSON.parse(raw);
+    if (!s.auth || !s.exp) return false;
+    if (Date.now() > s.exp) { sessionStorage.removeItem(SESSION_KEY); return false; }
+    return true;
+  } catch(e) { return false; }
+}
+
+function clearSession() {
+  sessionStorage.removeItem(SESSION_KEY);
+}
+
+// ════════════════════════════════════════════════════════════════
+// STATE
+// ════════════════════════════════════════════════════════════════
+let mqttC = null, map = null, marker = null, startMarker = null, pathLine = null;
+let pathPts = [], speedHistory = [], storedAlerts = [];
+let currentTileLayer = null, currentThemeIdx = 0;
+let gfCircles = [];
+
+let gpsHasFix = false;
+let ignitionOn = false;
+let trackingActive = false;
+let currentSpeedLimit = 60;
+let localGeofences = [];
+let lastTripDist = 0;
+
+const MAP_THEMES = [
+  { label:'🌙 DARK',
+    tile:'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    path:'#22d3ee', marker:'#22d3ee', start:'#34d399', light:false },
+  { label:'☀️ LIGHT',
+    tile:'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+    path:'#0891b2', marker:'#0891b2', start:'#059669', light:true },
+  { label:'🛰️ SAT',
+    tile:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    path:'#fbbf24', marker:'#fbbf24', start:'#34d399', light:false }
+];
+
+// ════════════════════════════════════════════════════════════════
+// LOCAL STORAGE
+// ════════════════════════════════════════════════════════════════
+const SK = { trail:'fh6_trail', telem:'fh6_telem', alerts:'fh6_alerts', gf:'fh6_gf', speeds:'fh6_spd' };
+
+const ls = {
+  set(k,v){ try{localStorage.setItem(k,JSON.stringify(v));}catch(e){} },
+  get(k,def=null){ try{const d=localStorage.getItem(k);return d?JSON.parse(d):def;}catch(e){return def;} }
+};
+
+function saveAll() {
+  ls.set(SK.trail, pathPts.slice(-500));
+  ls.set(SK.speeds, speedHistory);
+  ls.set(SK.gf, localGeofences);
+}
+window.addEventListener('beforeunload', saveAll);
+
+// ════════════════════════════════════════════════════════════════
+// PUBLISH COMMAND
+// ════════════════════════════════════════════════════════════════
+function publishCmd(action, extra={}) {
+  if (!mqttC) return;
+  mqttC.publish(TOPIC_CMD, JSON.stringify({action,...extra}), {qos:0});
+}
+
+// ════════════════════════════════════════════════════════════════
+// IGNITION LOGIC  (Req #3: <2 km/h = OFF, >2 km/h = ON)
+// ════════════════════════════════════════════════════════════════
+function updateIgnition(speed) {
+  const on = speed > 2;
+  if (on === ignitionOn) return;
+  ignitionOn = on;
+  const badge = document.getElementById('ignBadge');
+  const lbl   = document.getElementById('ignLbl');
+  badge.className = `ign-badge ${on ? 'on' : 'off'}`;
+  lbl.textContent = on ? 'IGN ON' : 'IGN OFF';
+}
+
+// ════════════════════════════════════════════════════════════════
+// SIGNAL BARS  (Req #4)
+// ════════════════════════════════════════════════════════════════
+function updateSignalBars(csq) {
+  const bars = csq >= 20 ? 5 : csq >= 15 ? 4 : csq >= 10 ? 3 : csq >= 5 ? 2 : csq > 0 ? 1 : 0;
+  const colors = ['var(--red)','var(--red)','var(--amber)','var(--amber)','var(--green)','var(--green)'];
+  for (let i = 1; i <= 5; i++) {
+    const el = document.getElementById('sb' + i);
+    if (el) el.style.background = i <= bars ? (colors[bars-1]||'var(--green)') : 'var(--border2)';
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// LAST-SEEN TIMER
+// ════════════════════════════════════════════════════════════════
+setInterval(() => {
+  const last = ls.get(SK.telem);
+  if (!last || !last._at) return;
+  const sec = Math.floor((Date.now() - last._at) / 1000);
+  const el = document.getElementById('hTime');
+  el.textContent = sec < 60 ? `${sec}s ago` : `${Math.floor(sec/60)}m ${sec%60}s ago`;
+  el.style.color = sec > 120 ? 'var(--red)' : 'var(--text)';
+}, 1000);
+
+// ════════════════════════════════════════════════════════════════
+// SPEED CHART
+// ════════════════════════════════════════════════════════════════
+function drawSpeedChart() {
+  const canvas = document.getElementById('speedChart');
+  if (!canvas) return;
+  const wrap = document.getElementById('speedStripWrap');
+  canvas.width  = wrap.offsetWidth;
+  canvas.height = wrap.offsetHeight;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0,0,w,h);
+  if (speedHistory.length < 2) return;
+
+  const maxSpd = Math.max(currentSpeedLimit * 1.3, ...speedHistory, 20);
+  const step = w / Math.max(1, speedHistory.length - 1);
+
+  // Speed limit line
+  const limitY = h - (currentSpeedLimit / maxSpd) * h;
+  ctx.beginPath();
+  ctx.strokeStyle = 'rgba(251,191,36,0.3)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4,4]);
+  ctx.moveTo(0, limitY); ctx.lineTo(w, limitY);
+  ctx.stroke(); ctx.setLineDash([]);
+
+  // Speed area
+  ctx.beginPath();
+  ctx.strokeStyle = '#22d3ee';
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = 'round';
+  speedHistory.forEach((s,i) => {
+    const x = i * step, y = h - (s / maxSpd) * h;
+    i === 0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+
+  const grad = ctx.createLinearGradient(0,0,0,h);
+  grad.addColorStop(0,'rgba(34,211,238,0.2)');
+  grad.addColorStop(1,'rgba(34,211,238,0)');
+  ctx.lineTo(w,h); ctx.lineTo(0,h);
+  ctx.fillStyle = grad; ctx.fill();
+
+  const limEl = document.getElementById('speedLimitLine');
+  if (limEl) limEl.textContent = `${currentSpeedLimit} km/h limit`;
+}
+
+// ════════════════════════════════════════════════════════════════
+// MAP INIT
+// ════════════════════════════════════════════════════════════════
+function markerIcon(color, glow, sz=18) {
+  return L.divIcon({
+    className:'',
+    html:`<div style="width:${sz}px;height:${sz}px;background:${color};border-radius:50%;border:2.5px solid #060a10;box-shadow:0 0 14px ${glow};"></div>`,
+    iconSize:[sz,sz], iconAnchor:[sz/2,sz/2]
+  });
+}
+
+function initMap() {
+  const saved = ls.get(SK.trail, []);
+  if (saved.length) pathPts = saved;
+  speedHistory = ls.get(SK.speeds, []);
+
+  const center = pathPts.length ? pathPts[pathPts.length-1] : [17.3117, 78.5824];
+  const t = MAP_THEMES[0];
+
+  currentTileLayer = L.tileLayer(t.tile, {maxZoom:19});
+  map = L.map('fleet-map', {
+    center, zoom:15, zoomControl:false, attributionControl:false,
+    layers:[currentTileLayer]
+  });
+
+  marker    = L.marker(center, {icon: markerIcon(t.marker, t.marker, 18)}).addTo(map);
+  pathLine  = L.polyline(pathPts, {color: t.path, weight:3, opacity:0.7}).addTo(map);
+
+  if (pathPts.length > 1) {
+    startMarker = L.marker(pathPts[0], {icon: markerIcon(t.start, t.start, 14)}).addTo(map);
+    map.fitBounds(L.latLngBounds(pathPts), {padding:[30,30], maxZoom:16});
+  }
+
+  localGeofences = ls.get(SK.gf, []);
+  localGeofences.forEach(gf => drawGfCircle(gf.lat, gf.lng, gf.radius, gf.name));
+  renderGeofences();
+
+  window.addEventListener('resize', () => setTimeout(()=>{map.invalidateSize();drawSpeedChart();},100));
+
+  document.getElementById('fsBtn').addEventListener('click', function() {
+    const w = document.getElementById('mapWrap');
+    w.classList.toggle('fullscreen');
+    this.textContent = w.classList.contains('fullscreen') ? '✕' : '⛶';
+    setTimeout(() => map.invalidateSize(), 350);
+  });
+
+  document.getElementById('themeBtn').addEventListener('click', function() {
+    currentThemeIdx = (currentThemeIdx + 1) % MAP_THEMES.length;
+    const t = MAP_THEMES[currentThemeIdx];
+    map.removeLayer(currentTileLayer);
+    currentTileLayer = L.tileLayer(t.tile,{maxZoom:19}).addTo(map);
+    pathLine.setStyle({color: t.path});
+    marker.setIcon(markerIcon(t.marker, t.marker, 18));
+    if (startMarker) startMarker.setIcon(markerIcon(t.start, t.start, 14));
+    this.textContent = t.label;
+    const bar = document.getElementById('mapInfoBar');
+    if (t.light) {
+      bar.classList.add('light-mode');
+      bar.querySelectorAll('.mib-lbl').forEach(e=>e.style.color='rgba(0,0,0,0.4)');
+      bar.querySelectorAll('.mib-val').forEach(e=>e.style.color='rgba(0,0,0,0.85)');
+      document.getElementById('mSpd').style.color='#0891b2';
+    } else {
+      bar.classList.remove('light-mode');
+      bar.querySelectorAll('.mib-lbl').forEach(e=>e.style.color='');
+      bar.querySelectorAll('.mib-val').forEach(e=>e.style.color='');
+      document.getElementById('mSpd').style.color='var(--cyan)';
+    }
+  });
+}
+
+function updateMap(lat, lng) {
+  if (!map) return;
+  const t = MAP_THEMES[currentThemeIdx];
+  if (!pathPts.length && !startMarker) {
+    startMarker = L.marker([lat,lng], {icon: markerIcon(t.start, t.start, 14)}).addTo(map);
+  }
+  marker.setLatLng([lat,lng]);
+  map.setView([lat,lng], map.getZoom(), {animate:true, duration:0.5});
+  pathPts.push([lat,lng]);
+  if (pathPts.length > 500) pathPts.shift();
+  pathLine.setLatLngs(pathPts);
+  if (pathPts.length % 5 === 0) ls.set(SK.trail, pathPts);
+}
+
+// ════════════════════════════════════════════════════════════════
+// TRACKING BAR
+// ════════════════════════════════════════════════════════════════
+function updateTrackingBar(fix, tracking, trip) {
+  const dot   = document.getElementById('trkDot');
+  const lbl   = document.getElementById('trkLbl');
+  const info  = document.getElementById('trkInfo');
+  const pill  = document.getElementById('tripPill');
+  const btnS  = document.getElementById('btnStart');
+  const btnSt = document.getElementById('btnStop');
+
+  if (!fix) {
+    dot.style.cssText   = 'background:var(--amber);animation:dotPulse 2s infinite';
+    lbl.style.color     = 'var(--amber)';
+    lbl.textContent     = 'Waiting for GPS Fix…';
+    info.textContent    = '—';
+    btnS.disabled = true;
+    btnS.style.display  = ''; btnSt.style.display = 'none';
+    pill.style.display  = 'none';
+    return;
+  }
+
+  if (tracking) {
+    dot.style.cssText = 'background:var(--green);animation:dotPulse 2s infinite';
+    lbl.style.color   = 'var(--green)';
+    lbl.textContent   = 'Tracking Active';
+    if (trip && trip.active) {
+      const km  = (trip.distKm||0).toFixed(1);
+      const dur = trip.durationMin ? `${Math.floor(trip.durationMin)}m` : '—';
+      info.textContent = `Trip #${trip.num} · ${km} km · ${dur}`;
+      pill.style.display = '';
+    } else {
+      info.textContent = 'GPS Fix OK — Idle';
+      pill.style.display = 'none';
+    }
+    btnS.style.display = 'none'; btnSt.style.display = '';
+  } else {
+    dot.style.cssText = 'background:var(--text2);animation:none';
+    lbl.style.color   = 'var(--text2)';
+    lbl.textContent   = 'Ready to track';
+    info.textContent  = 'GPS Fix OK';
+    btnS.disabled = false;
+    btnS.style.display = ''; btnSt.style.display = 'none';
+    pill.style.display = 'none';
+  }
+}
+
+function startTracking() {
+  if (!gpsHasFix) { addAlert('info','no_gps_fix','GPS fix required before tracking'); return; }
+  publishCmd('start_tracking');
+  trackingActive = true;
+  updateTrackingBar(true, true, null);
+}
+
+function stopTracking() {
+  publishCmd('stop_tracking');
+  trackingActive = false;
+  updateTrackingBar(gpsHasFix, false, null);
+}
+
+// ════════════════════════════════════════════════════════════════
+// SPEED LIMIT
+// ════════════════════════════════════════════════════════════════
+function setSpeedLimit() {
+  const v = parseInt(document.getElementById('speedLimInput').value);
+  if (isNaN(v)||v<20||v>200) { alert('Enter 20–200 km/h'); return; }
+  publishCmd('set_speed_limit', {value: String(v)});
+  currentSpeedLimit = v;
+  document.getElementById('currentLimitDisplay').textContent = `Active: ${v} km/h`;
+  drawSpeedChart();
+  const btn = document.getElementById('speedLimBtn');
+  btn.textContent = '✓ SENT'; btn.style.color='var(--green)';
+  setTimeout(()=>{ btn.textContent='SET →'; btn.style.color=''; }, 2000);
+}
+
+// ════════════════════════════════════════════════════════════════
+// GEOFENCE MANAGER
+// ════════════════════════════════════════════════════════════════
+function drawGfCircle(lat, lng, radius, name) {
+  if (!map) return null;
+  const circle = L.circle([lat,lng], {
+    radius, color:'#22d3ee', weight:1.5, opacity:0.5,
+    fillColor:'#22d3ee', fillOpacity:0.04
+  }).addTo(map);
+  circle.bindTooltip(name, {permanent:false, direction:'top', className:'gf-tip'});
+  gfCircles.push({circle, name});
+  return circle;
+}
+
+function rebuildGfCircles() {
+  gfCircles.forEach(g=>{ try{map.removeLayer(g.circle);}catch(e){} });
+  gfCircles = [];
+  localGeofences.forEach(gf=>drawGfCircle(gf.lat,gf.lng,gf.radius,gf.name));
+}
+
+function renderGeofences() {
+  const el = document.getElementById('gfList');
+  document.getElementById('gfCountLbl').textContent = `${localGeofences.length} / 8 zones`;
+  if (!localGeofences.length) { el.innerHTML = '<div class="empty">No zones configured</div>'; return; }
+  el.innerHTML = localGeofences.map((gf,i)=>{
+    const ins   = !!gf.inside;
+    const dotC  = ins ? 'var(--red)' : 'var(--green)';
+    const bgC   = ins ? 'rgba(248,113,113,0.1)' : 'rgba(52,211,153,0.08)';
+    const fgC   = ins ? 'var(--red)' : 'var(--green)';
+    const dist  = gf.dist >= 0 ? `${Math.round(gf.dist)}m` : '—';
+    return `<div class="gf-zone" style="margin-bottom:5px">
+      <div class="gf-dot" style="background:${dotC};box-shadow:0 0 5px ${dotC}"></div>
+      <div style="flex:1;min-width:0">
+        <div class="gf-name">${gf.name}</div>
+        <div class="gf-dist">r:${Math.round(gf.radius)}m · ${dist}</div>
+      </div>
+      <span class="gf-status-badge" style="background:${bgC};color:${fgC}">${ins?'INSIDE':'OUTSIDE'}</span>
+      <button class="gf-del" onclick="removeGf(${i})">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function addGeofence() {
+  const name = document.getElementById('gfName').value.trim();
+  const lat  = parseFloat(document.getElementById('gfLat').value);
+  const lng  = parseFloat(document.getElementById('gfLng').value);
+  const rad  = parseFloat(document.getElementById('gfRad').value);
+  if (!name) { alert('Enter a zone name'); return; }
+  if (isNaN(lat)||isNaN(lng)) { alert('Enter valid coordinates'); return; }
+  if (isNaN(rad)||rad<50) { alert('Radius must be ≥ 50 m'); return; }
+  if (localGeofences.length >= 8) { alert('Maximum 8 geofences'); return; }
+  publishCmd('add_geofence', {name, lat:lat.toFixed(6), lng:lng.toFixed(6), radius:String(rad)});
+  localGeofences.push({name, lat, lng, radius:rad, inside:false, dist:-1});
+  ls.set(SK.gf, localGeofences);
+  drawGfCircle(lat, lng, rad, name);
+  renderGeofences();
+  ['gfName','gfLat','gfLng'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('gfRad').value = '200';
+}
+
+function removeGf(i) {
+  const gf = localGeofences[i];
+  if (!gf) return;
+  publishCmd('remove_geofence', {name: gf.name});
+  localGeofences.splice(i,1);
+  ls.set(SK.gf, localGeofences);
+  rebuildGfCircles();
+  renderGeofences();
+}
+
+function oneClickGeofence() {
+  const last = ls.get(SK.telem);
+  if (!last||!last.gps||!last.gps.fix) { alert('No GPS fix available'); return; }
+  const lat = last.gps.lat, lng = last.gps.lng;
+  const ts  = new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+  const name = `Zone-${ts}`;
+  if (localGeofences.length >= 8) { alert('Maximum 8 geofences'); return; }
+  publishCmd('add_geofence', {name, lat:lat.toFixed(6), lng:lng.toFixed(6), radius:'200'});
+  localGeofences.push({name, lat, lng, radius:200, inside:false, dist:-1});
+  ls.set(SK.gf, localGeofences);
+  drawGfCircle(lat, lng, 200, name);
+  renderGeofences();
+  if (map) map.setView([lat,lng], 16);
+  addAlert('info','geofence_added',`Zone "${name}" created at current position`);
+}
+
+function fillCurrentGPS() {
+  const last = ls.get(SK.telem);
+  if (!last||!last.gps||!last.gps.fix) { alert('No GPS fix yet'); return; }
+  document.getElementById('gfLat').value = last.gps.lat.toFixed(6);
+  document.getElementById('gfLng').value = last.gps.lng.toFixed(6);
+}
+
+function syncGfFromTelemetry(gfArr) {
+  if (!gfArr||!gfArr.length) return;
+  gfArr.forEach(tGf => {
+    const local = localGeofences.find(l=>l.name===tGf.name);
+    if (local) { local.inside=tGf.inside; if(tGf.dist>=0) local.dist=tGf.dist; }
+  });
+  renderGeofences();
+}
+
+// ════════════════════════════════════════════════════════════════
+// SCORE RING
+// ════════════════════════════════════════════════════════════════
+function drawScoreRing(score) {
+  const svg = document.getElementById('scoreRing'); if(!svg) return;
+  const pct=score/100, r=36, cx=45, cy=45;
+  const color = score>=80?'var(--green)':score>=60?'#6ee7b7':score>=40?'var(--amber)':'var(--red)';
+  const circ=2*Math.PI*r, off=circ*(1-pct);
+  svg.innerHTML = `
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="5"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="5"
+      stroke-linecap="round" stroke-dasharray="${circ}" stroke-dashoffset="${off}"
+      transform="rotate(-90 ${cx} ${cy})"
+      style="transition:all .8s ease-out;filter:drop-shadow(0 0 6px ${color})"/>`;
+  const numEl = document.getElementById('scoreVal');
+  numEl.textContent = Math.round(score);
+  numEl.style.color = color;
+  document.getElementById('hScore').textContent = Math.round(score);
+  document.getElementById('hScore').style.color = color;
+}
+
+// ════════════════════════════════════════════════════════════════
+// TPMS RENDER
+// ════════════════════════════════════════════════════════════════
+function renderTpms(tpmsArr) {
+  const el = document.getElementById('tpmsInfo');
+  const map_ = {};
+  (tpmsArr||[]).forEach(t => { map_[t.mac] = t; });
+
+  const tiles = TPMS_ORDER.map(mac => {
+    const name   = TPMS_MAP[mac];
+    const sensor = map_[mac];
+    const offline = !sensor;
+
+    if (offline) {
+      return `<div class="tpms-tile offline">
+        <div class="tpms-pos">${name}</div>
+        <div class="tpms-offline-lbl">— OFFLINE —</div>
+      </div>`;
+    }
+    const warn  = sensor.psi < TPMS_LOW_PSI || sensor.psi > TPMS_HIGH_PSI || sensor.tempC > TPMS_HIGH_TEMP;
+    const color = warn ? 'var(--red)' : 'var(--cyan)';
+    const bat   = sensor.bat||0;
+    const batC  = bat < 20 ? 'var(--red)' : bat < 40 ? 'var(--amber)' : 'var(--green)';
+    return `<div class="tpms-tile${warn?' warn':''}">
+      <div class="tpms-pos">${name}</div>
+      <div class="tpms-psi" style="color:${color}">${sensor.psi.toFixed(1)}<span> PSI</span></div>
+      <div class="tpms-temp">${sensor.tempC.toFixed(0)}°C</div>
+      <div class="tpms-bat" style="color:${batC}">${bat}% 🔋</div>
+    </div>`;
+  }).join('');
+
+  el.innerHTML = `<div class="tpms-grid">${tiles}</div>`;
+}
+
+// ════════════════════════════════════════════════════════════════
+// ALERT SYSTEM
+// ════════════════════════════════════════════════════════════════
+function timeStr() {
+  const d=new Date();
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+}
+
+const ALERT_STYLES = {
+  critical: {bg:'rgba(248,113,113,0.08)', border:'rgba(248,113,113,0.2)', fg:'var(--red)'},
+  warning:  {bg:'rgba(251,191,36,0.08)', border:'rgba(251,191,36,0.2)', fg:'var(--amber)'},
+  info:     {bg:'rgba(34,211,238,0.06)', border:'rgba(34,211,238,0.15)', fg:'var(--cyan)'}
+};
+
+function addAlert(severity, type, detail) {
+  const style = ALERT_STYLES[severity] || ALERT_STYLES.info;
+  const t = timeStr();
+
+  storedAlerts.push({t, type, detail, ...style, ts:Date.now()});
+  if (storedAlerts.length > 50) storedAlerts.shift();
+  ls.set(SK.alerts, storedAlerts);
+
+  const el = document.getElementById('alertFeed');
+  const d = document.createElement('div');
+  d.className = 'alert-item';
+  d.style.cssText = `background:${style.bg};border-color:${style.border}`;
+  d.innerHTML = `<span class="alert-time">${t}</span>
+    <span class="alert-badge" style="background:rgba(0,0,0,0.2);color:${style.fg}">${type}</span>
+    <span class="alert-msg" style="color:${style.fg}">${detail}</span>`;
+  el.insertBefore(d, el.firstChild);
+  while (el.children.length > 30) el.removeChild(el.lastChild);
+
+  document.getElementById('sAlerts').textContent = storedAlerts.length;
+
+  if (severity === 'critical') {
+    const banner = document.getElementById('critBanner');
+    document.getElementById('critBannerText').textContent = `⚠️ CRITICAL: ${detail.toUpperCase()}`;
+    banner.style.display = 'block';
+  }
+}
+
+function handleAlertMsg(data) {
+  const type = data.alert || 'unknown';
+  const tStr = type.toLowerCase();
+  let sev = 'info', detail = type;
+
+  if (tStr.includes('tpms')||tStr.includes('harsh')||tStr.includes('crash')) sev='critical';
+  else if (tStr.includes('speed')||tStr.includes('geofence')) sev='warning';
+
+  if (data.accel)   detail = `Harsh Accel ${parseFloat(data.accel).toFixed(1)} km/h/s`;
+  else if (data.brake) detail = `Harsh Brake ${parseFloat(data.brake).toFixed(1)} km/h/s`;
+  else if (data.turn)  detail = `Harsh Corner ${parseFloat(data.turn).toFixed(0)} °/s`;
+  else if (data.psi)   detail = `Tire PSI: ${parseFloat(data.psi).toFixed(1)} (${data.sensor||''})`;
+  else if (data.zone)  detail = `${type} — ${data.zone}${data.event?' ('+data.event+')':''}`;
+  else if (data.speed) detail = `${type} @ ${parseFloat(data.speed).toFixed(0)} km/h`;
+
+  addAlert(sev, type, detail);
+}
+
+function clearAlerts() {
+  storedAlerts = [];
+  document.getElementById('alertFeed').innerHTML = '<div class="empty">No alerts</div>';
+  document.getElementById('sAlerts').textContent = '0';
+  ls.set(SK.alerts, []);
+}
+
+function restoreAlerts() {
+  storedAlerts = ls.get(SK.alerts, []);
+  if (!storedAlerts.length) return;
+  const el = document.getElementById('alertFeed');
+  storedAlerts.slice(-15).reverse().forEach(a => {
+    const d = document.createElement('div');
+    d.className = 'alert-item';
+    d.style.cssText = `background:${a.bg};border-color:${a.border}`;
+    d.innerHTML = `<span class="alert-time">${a.t}</span>
+      <span class="alert-badge" style="background:rgba(0,0,0,0.2);color:${a.fg}">${a.type}</span>
+      <span class="alert-msg" style="color:${a.fg}">${a.detail}</span>`;
+    el.appendChild(d);
+  });
+  document.getElementById('sAlerts').textContent = storedAlerts.length;
+}
+
+// ════════════════════════════════════════════════════════════════
+// MAIN DASH UPDATE
+// ════════════════════════════════════════════════════════════════
+function updateDash(d) {
+  if (d.gps) {
+    const fix = !!d.gps.fix;
+    gpsHasFix = fix;
+
+    document.getElementById('mLat').textContent  = fix ? d.gps.lat.toFixed(6) : '—';
+    document.getElementById('mLng').textContent  = fix ? d.gps.lng.toFixed(6) : '—';
+    document.getElementById('mHdg').textContent  = fix ? d.gps.heading.toFixed(1)+'°' : '—';
+    document.getElementById('mAlt').textContent  = fix ? d.gps.alt.toFixed(0)+' m' : '—';
+    document.getElementById('mHdop').textContent = d.gps.hdop != null ? d.gps.hdop.toFixed(1) : '—';
+
+    const rawSpd = d.gps.speed || 0;
+    const dispSpd = rawSpd < 2 ? 0 : rawSpd;
+    document.getElementById('mSpd').textContent = dispSpd + ' km/h';
+    document.getElementById('sSpd').textContent = dispSpd;
+
+    document.getElementById('sSat').textContent = d.gps.sats ?? '—';
+    document.getElementById('sFix').textContent = fix ? '3D Fix' : 'No Fix';
+
+    updateIgnition(rawSpd);
+
+    if (fix && rawSpd >= 2 && d.gps.lat && d.gps.lng) updateMap(d.gps.lat, d.gps.lng);
+
+    speedHistory.push(dispSpd);
+    if (speedHistory.length > 30) speedHistory.shift();
+    drawSpeedChart();
+  }
+
+  if (d.signal) {
+    updateSignalBars(d.signal.csq||0);
+  }
+
+  if (d.fw) document.getElementById('hFw').textContent = `v${d.fw}`;
+
+  if (d.deviceId) document.getElementById('sDevId').textContent = d.deviceId.replace('hub-','').replace('-','');
+  if (d.uptime != null) {
+    const u = d.uptime;
+    const h = Math.floor(u/3600), m = Math.floor((u%3600)/60);
+    document.getElementById('sUptime').textContent = `uptime: ${h}h${m}m`;
+  }
+
+  if (d.trackingActive !== undefined) trackingActive = d.trackingActive;
+  updateTrackingBar(gpsHasFix, trackingActive, d.trip||null);
+
+  if (d.trip) {
+    lastTripDist = d.trip.distKm || 0;
+    document.getElementById('sTripDist').textContent = lastTripDist.toFixed(1);
+  }
+
+  if (d.driver) {
+    drawScoreRing(d.driver.score ?? 100);
+    document.getElementById('dAccel').textContent  = d.driver.harshAccel  || 0;
+    document.getElementById('dBrake').textContent  = d.driver.harshBrake  || 0;
+    document.getElementById('dCorner').textContent = d.driver.harshCorner || 0;
+    document.getElementById('dSpeed').textContent  = d.driver.speeding    || 0;
+    document.getElementById('dMaxSpd').textContent = d.driver.maxSpeed != null ? d.driver.maxSpeed.toFixed(0)+' km/h' : '—';
+    if (d.driver.speedLimit) {
+      currentSpeedLimit = d.driver.speedLimit;
+      document.getElementById('speedLimInput').value = Math.round(currentSpeedLimit);
+      document.getElementById('currentLimitDisplay').textContent = `Active: ${Math.round(currentSpeedLimit)} km/h`;
+    }
+  }
+
+  renderTpms(d.tpms);
+
+  if (d.geofences) syncGfFromTelemetry(d.geofences);
+
+  d._at = Date.now();
+  ls.set(SK.telem, d);
+}
+
+// ════════════════════════════════════════════════════════════════
+// MESSAGE ROUTER
+// ════════════════════════════════════════════════════════════════
+function handleMsg(topic, data) {
+  const seg = topic.split('/').pop();
+  if (seg === 'telemetry') { updateDash(data); }
+  else if (seg === 'alerts') { handleAlertMsg(data); }
+  else if (seg === 'lwt') {
+    setConn('error','DEVICE OFFLINE');
+    addAlert('critical','device_offline','LWT: Device went offline unexpectedly');
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// CONNECTION STATUS
+// ════════════════════════════════════════════════════════════════
+function setConn(state, label) {
+  const cols = {connected:'var(--green)', connecting:'var(--amber)', error:'var(--red)'};
+  const c = cols[state]||'var(--amber)';
+  document.getElementById('cDot').style.background = c;
+  const el = document.getElementById('cLbl');
+  el.style.color = c; el.textContent = label;
+}
+
+// ════════════════════════════════════════════════════════════════
+// RESTORE STATE
+// ════════════════════════════════════════════════════════════════
+function restoreState() {
+  const last = ls.get(SK.telem);
+  if (last) updateDash(last);
+  restoreAlerts();
+  setTimeout(() => { drawSpeedChart(); rebuildGfCircles(); renderGeofences(); }, 400);
+  updateTrackingBar(false, false, null);
+}
+
+// ════════════════════════════════════════════════════════════════
+// BOOT APP (called after login or session restore)
+// ════════════════════════════════════════════════════════════════
+function bootApp() {
+  const ov = document.getElementById('loginOverlay');
+  const sh = document.getElementById('appShell');
+  ov.style.display = 'none';
+  sh.style.display = 'flex';
+  initMap();
+  restoreState();
+  connect();
+}
+
+// ════════════════════════════════════════════════════════════════
+// AWS IoT MQTT  (5s auto-reconnect)
+// ════════════════════════════════════════════════════════════════
+async function connect() {
+  AWS.config.region = CFG.region;
+  AWS.config.credentials = new AWS.CognitoIdentityCredentials({IdentityPoolId: CFG.pool});
+  try { await new Promise((r,j) => AWS.config.credentials.get(e=>e?j(e):r())); }
+  catch(e) { setConn('error','AUTH FAILED'); return; }
+
+  const creds=AWS.config.credentials, host=CFG.endpoint, region=CFG.region;
+  const now=new Date();
+  const ds=now.toISOString().replace(/[:\-]|\.\d{3}/g,'').substring(0,8);
+  const amz=now.toISOString().replace(/[:\-]|\.\d{3}/g,'').substring(0,15)+'Z';
+  const svc='iotdevicegateway', scope=`${ds}/${region}/${svc}/aws4_request`, alg='AWS4-HMAC-SHA256';
+  const qp=[`X-Amz-Algorithm=${alg}`,`X-Amz-Credential=${encodeURIComponent(creds.accessKeyId+'/'+scope)}`,`X-Amz-Date=${amz}`,`X-Amz-SignedHeaders=host`].sort().join('&');
+  const cr=`GET\n/mqtt\n${qp}\nhost:${host}\n\nhost\n${await sha256('')}`;
+  const sts=`${alg}\n${amz}\n${scope}\n${await sha256(cr)}`;
+  const sk=await getSigKey(creds.secretAccessKey,ds,region,svc);
+  const sig=await hmacHex(sk,sts);
+  let url=`wss://${host}/mqtt?${qp}&X-Amz-Signature=${sig}`;
+  if (creds.sessionToken) url+=`&X-Amz-Security-Token=${encodeURIComponent(creds.sessionToken)}`;
+
+  setConn('connecting','CONNECTING…');
+  mqttC = mqtt.connect(url, {
+    transformWsUrl:u=>u, protocolVersion:4, clean:true,
+    reconnectPeriod:5000,
+    connectTimeout:12000,
+    clientId:'fh-'+Math.random().toString(16).substr(2,8)
+  });
+
+  mqttC.on('connect', () => {
+    setConn('connected','CONNECTED');
+    mqttC.subscribe(TOPIC_WILD, {qos:0});
+  });
+  mqttC.on('message', (t,p) => {
+    try { handleMsg(t, JSON.parse(p.toString())); } catch(e){}
+  });
+  mqttC.on('error', () => setConn('error','ERROR'));
+  mqttC.on('close', () => setConn('connecting','RECONNECTING…'));
+  mqttC.on('reconnect', () => setConn('connecting','RECONNECTING…'));
+}
+
+// ════════════════════════════════════════════════════════════════
+// CRYPTO  (AWS SigV4)
+// ════════════════════════════════════════════════════════════════
+async function sha256(m){const b=new TextEncoder().encode(m);const h=await crypto.subtle.digest('SHA-256',b);return Array.from(new Uint8Array(h)).map(b=>b.toString(16).padStart(2,'0')).join('');}
+async function hmac(k,m){const ck=await crypto.subtle.importKey('raw',k instanceof ArrayBuffer?k:new TextEncoder().encode(k),{name:'HMAC',hash:'SHA-256'},false,['sign']);return await crypto.subtle.sign('HMAC',ck,new TextEncoder().encode(m));}
+async function hmacHex(k,m){const s=await hmac(k,m);return Array.from(new Uint8Array(s)).map(b=>b.toString(16).padStart(2,'0')).join('');}
+async function getSigKey(k,d,r,s){const kd=await hmac('AWS4'+k,d);const kr=await hmac(kd,r);const ks=await hmac(kr,s);return await hmac(ks,'aws4_request');}
+
+// ════════════════════════════════════════════════════════════════
+// LOGIN — with SESSION PERSISTENCE
+// ════════════════════════════════════════════════════════════════
+const AUTH = {user:'arclabs', pass:'12ArC12@'};
+
+function attemptLogin() {
+  const u=document.getElementById('loginUser').value.trim();
+  const p=document.getElementById('loginPass').value;
+  const err=document.getElementById('loginError');
+  if (u===AUTH.user && p===AUTH.pass) {
+    err.classList.remove('show');
+    setSession();  // ← PERSIST SESSION
+    const ov=document.getElementById('loginOverlay');
+    ov.classList.add('leaving');
+    setTimeout(()=>{ bootApp(); }, 420);
+  } else {
+    err.classList.remove('show');
+    void err.offsetWidth;
+    err.classList.add('show');
+    document.getElementById('loginPass').value='';
+    document.getElementById('loginPass').focus();
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  // ── SESSION CHECK: skip login if session is valid ──
+  if (hasValidSession()) {
+    bootApp();
+    return;
+  }
+
+  // Otherwise show login
+  document.getElementById('loginBtn').addEventListener('click', attemptLogin);
+  ['loginUser','loginPass'].forEach(id=>{
+    document.getElementById(id).addEventListener('keydown',e=>{if(e.key==='Enter')attemptLogin();});
+  });
+  document.getElementById('pwToggle').addEventListener('click', function(){
+    const inp=document.getElementById('loginPass');
+    const h=inp.type==='password';
+    inp.type=h?'text':'password';
+    this.textContent=h?'🙈':'👁';
+  });
+  document.getElementById('loginUser').focus();
+});
+</script>
+</body>
+</html>
